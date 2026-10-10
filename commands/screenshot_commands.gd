@@ -86,17 +86,23 @@ func capture_editor_screenshot(params: Dictionary) -> Dictionary:
 	if viewport == null:
 		return _error("NO_VIEWPORT", "Could not find editor viewport")
 
-	# Espera al dibujado antes de leer la textura: sin esto se lee una
-	# textura sin renderizar (marcador de 2x2). Igual que el path de juego.
-	await RenderingServer.frame_post_draw
+	# Un viewport oculto (pestaña Script/AssetLib activa) nunca se dibuja:
+	# esperarlo colgaría para siempre. Se informa accionable en vez de esperar.
+	if not _viewport_on_active_tab(viewport):
+		return _error("NO_VIEWPORT", "Editor 2D/3D viewport is not visible: switch to the 2D or 3D tab and retry capture_editor_screenshot.")
+
+	# Lectura acotada: los process frames siempre avanzan (el propio
+	# servidor los usa), así que este bucle nunca cuelga. Cada iteración
+	# deja que un dibujado pendiente ocurra; si la pestaña se acaba de
+	# activar, los primeros frames pueden traer la textura anterior.
 	var image := viewport.get_texture().get_image()
-	if _is_degenerate(image):
-		# Un reintento tras otro frame cubre el caso de textura leída
-		# antes del primer frame renderizado o sin layout aplicado.
-		await RenderingServer.frame_post_draw
+	var frames := 0
+	while _is_degenerate(image) and frames < 10:
+		await Engine.get_main_loop().process_frame
 		image = viewport.get_texture().get_image()
+		frames += 1
 	if _is_degenerate(image):
-		return _error("DEGENERATE_CAPTURE", "Editor viewport texture not rendered (empty placeholder). Activa la pestana 2D/3D del editor y reintenta capture_editor_screenshot.")
+		return _error("CAPTURE_FAILED", "Editor viewport texture not rendered after %d frames: switch to the 2D or 3D tab and retry capture_editor_screenshot." % frames)
 	return _process_and_encode_image(image, max_width)
 
 
