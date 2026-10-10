@@ -16,6 +16,12 @@ const CLOSE_CODE_STALE := 4002
 const CLOSE_REASON_STALE := "Connection timed out (no activity)"
 const CLOSE_CODE_ALREADY_CONNECTED := 4001
 const CLOSE_REASON_ALREADY_CONNECTED := "Another client is already connected"
+# Archivo de estado para el token de sesión (lo lee el server MCP sin
+# intervención manual). Guardia local de accidentes, no secreto: el token
+# ya aparece en el log del editor y vive en .godot/ (local a la máquina,
+# ignorado por git). Formato exacto esperado por el server: {"token": "..."}.
+const TOKEN_STATUS_DIR := ".godot"
+const TOKEN_STATUS_FILE := "res://.godot/mcp-token.json"
 
 var _server: TCPServer
 var _peer: StreamPeerTCP
@@ -64,6 +70,7 @@ func start_server(port: int = DEFAULT_PORT, bind_address: String = "127.0.0.1") 
 	_session_token = _new_session_token()
 	_authed = false
 	MCPLog.info("MCP session token (send as first {command:auth} message): %s" % _session_token)
+	_publish_session_token()
 
 	return OK
 
@@ -71,6 +78,34 @@ func start_server(port: int = DEFAULT_PORT, bind_address: String = "127.0.0.1") 
 ## Token vigente para el handshake de la sesión actual.
 func get_session_token() -> String:
 	return _session_token
+
+
+## Publica el token en res://.godot/mcp-token.json para que el server lo lea
+## solo. Best-effort: si falla la escritura, avisa en el log y sigue; nunca
+## rompe el arranque del servidor.
+func _publish_session_token() -> void:
+	var dir := DirAccess.open("res://")
+	if dir == null:
+		MCPLog.warn("No se pudo publicar el token de sesión: sin acceso a res://")
+		return
+	if not dir.dir_exists(TOKEN_STATUS_DIR):
+		var dir_err := dir.make_dir(TOKEN_STATUS_DIR)
+		if dir_err != OK:
+			MCPLog.warn("No se pudo crear .godot/ para el token de sesión: %s" % error_string(dir_err))
+			return
+	var file := FileAccess.open(TOKEN_STATUS_FILE, FileAccess.WRITE)
+	if file == null:
+		MCPLog.warn("No se pudo publicar el token de sesión en .godot/mcp-token.json")
+		return
+	file.store_string(JSON.stringify({"token": _session_token}))
+	file.close()
+
+
+## Borra el archivo de estado del token. Best-effort: ignora errores
+## (el archivo puede no existir si la publicación falló al arrancar).
+func _clear_session_token() -> void:
+	if FileAccess.file_exists(TOKEN_STATUS_FILE):
+		DirAccess.remove_absolute(TOKEN_STATUS_FILE)
 
 
 func _new_session_token() -> String:
@@ -110,6 +145,7 @@ func stop_server() -> void:
 	_last_activity_msec = 0
 	_session_token = ""
 	_authed = false
+	_clear_session_token()
 
 
 func get_connected_host() -> String:
