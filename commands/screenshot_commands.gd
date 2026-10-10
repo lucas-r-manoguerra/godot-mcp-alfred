@@ -4,6 +4,9 @@ class_name MCPScreenshotCommands
 
 const DEFAULT_MAX_WIDTH := 900
 const SCREENSHOT_TIMEOUT := 5.0
+# Límite de validez: texturas sin renderizar reportan un marcador mínimo
+# (p. ej. 2x2). Todo lo igual o menor se considera captura degenerada.
+const MIN_CAPTURE_SIZE := 8
 
 var _screenshot_result: Dictionary = {}
 var _screenshot_pending: bool = false
@@ -83,8 +86,32 @@ func capture_editor_screenshot(params: Dictionary) -> Dictionary:
 	if viewport == null:
 		return _error("NO_VIEWPORT", "Could not find editor viewport")
 
+	# Un viewport oculto (pestaña Script/AssetLib activa) nunca se dibuja:
+	# esperarlo colgaría para siempre. Se informa accionable en vez de esperar.
+	if not _viewport_on_active_tab(viewport):
+		return _error("NO_VIEWPORT", "Editor 2D/3D viewport is not visible: switch to the 2D or 3D tab and retry capture_editor_screenshot.")
+
+	# Lectura acotada: los process frames siempre avanzan (el propio
+	# servidor los usa), así que este bucle nunca cuelga. Cada iteración
+	# deja que un dibujado pendiente ocurra; si la pestaña se acaba de
+	# activar, los primeros frames pueden traer la textura anterior.
 	var image := viewport.get_texture().get_image()
+	var frames := 0
+	while _is_degenerate(image) and frames < 10:
+		await Engine.get_main_loop().process_frame
+		image = viewport.get_texture().get_image()
+		frames += 1
+	if _is_degenerate(image):
+		return _error("CAPTURE_FAILED", "Editor viewport texture not rendered after %d frames: switch to the 2D or 3D tab and retry capture_editor_screenshot." % frames)
 	return _process_and_encode_image(image, max_width)
+
+
+# Una imagen degenerada (nula o de tamano marcador) indica textura sin
+# renderizar, no una captura valida. Nunca devolver exito con ese contenido.
+func _is_degenerate(image: Image) -> bool:
+	if image == null:
+		return true
+	return image.get_width() <= MIN_CAPTURE_SIZE and image.get_height() <= MIN_CAPTURE_SIZE
 
 
 # Lossless PNG, not JPEG: vision-token cost is set by resolution, not codec, so
