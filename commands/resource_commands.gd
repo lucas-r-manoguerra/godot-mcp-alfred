@@ -27,6 +27,12 @@ func get_resource_info(params: Dictionary) -> Dictionary:
 	if resource_path.is_empty():
 		return _error("INVALID_PARAMS", "resource_path is required")
 
+	var scoped := MCPUtils.validate_scoped_path(resource_path)
+	if scoped.has("error"):
+		var rerr: Dictionary = scoped["error"]
+		return _error(rerr["code"], rerr["message"])
+	resource_path = scoped["path"]
+
 	if not ResourceLoader.exists(resource_path):
 		return _error("RESOURCE_NOT_FOUND", "Resource not found: %s" % resource_path)
 

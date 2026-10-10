@@ -45,6 +45,10 @@ func _ready() -> void:
 	# injection target, become undrivable. The bridge answers to the debugger,
 	# not the game's pause state. Children (the sampler) inherit this mode.
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# Los módulos siempre existen (aunque no haya sesión de debugger), para
+	# que _process/_physics_process/is_stepping nunca toquen Nil en una
+	# ejecución sin depurador (p. ej. juego exportado o playtest headless).
+	_new_modules()
 	if not EngineDebugger.is_active():
 		return
 	_logger = _MCPGameLogger.new()
@@ -53,7 +57,6 @@ func _ready() -> void:
 	EngineDebugger.register_profiler("mcp_frame_profiler", _profiler)
 	_sampler = MCPRuntimeStateSampler.new()
 	add_child(_sampler)
-	_new_modules()
 	EngineDebugger.register_message_capture("godot_mcp", _on_debugger_message)
 	set_physics_process(false)  # only counts ticks during a step window
 	MCPLog.info("Game bridge initialized")

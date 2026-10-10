@@ -25,6 +25,13 @@ var _connected_host: String = ""
 var _connected_port: int = 0
 var _last_activity_msec: int = 0
 var _stale_reason: String = ""
+# Token de sesión: el primer mensaje de cada conexión debe ser
+# {"command":"auth","params":{"token":"..."}}. Es guardia de accidentes
+# (evita que un segundo cliente local pise la sesión activa), no una
+# frontera contra atacantes locales (el token sale en el log del editor).
+# Se rota en cada start_server y se exige aunque el bind sea localhost-only.
+var _session_token := ""
+var _authed := false
 # Newcomers that arrived while a live client already held the bridge. Each entry
 # is { "ws": WebSocketPeer, "tcp": StreamPeerTCP, "since_msec": int, "close_sent": bool }.
 # They are handshaked just far enough to receive a clean 4001 close, then dropped.
@@ -54,7 +61,25 @@ func start_server(port: int = DEFAULT_PORT, bind_address: String = "127.0.0.1") 
 		MCPLog.error("Failed to start server on %s:%d: %s" % [bind_address, port, error_string(err)])
 		return err
 
+	_session_token = _new_session_token()
+	_authed = false
+	MCPLog.info("MCP session token (send as first {command:auth} message): %s" % _session_token)
+
 	return OK
+
+
+## Token vigente para el handshake de la sesión actual.
+func get_session_token() -> String:
+	return _session_token
+
+
+func _new_session_token() -> String:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var bytes := PackedByteArray()
+	for i in 16:
+		bytes.append(rng.randi() & 0xFF)
+	return bytes.hex_encode()
 
 
 func stop_server() -> void:
@@ -83,6 +108,8 @@ func stop_server() -> void:
 	_connected_host = ""
 	_connected_port = 0
 	_last_activity_msec = 0
+	_session_token = ""
+	_authed = false
 
 
 func get_connected_host() -> String:
@@ -211,6 +238,7 @@ func _process_websocket() -> void:
 		WebSocketPeer.STATE_OPEN:
 			if not _is_connected:
 				_is_connected = true
+				_authed = false  # cada conexión nueva debe autenticar su sesión
 				_last_activity_msec = Time.get_ticks_msec()
 				client_connected.emit()
 				MCPLog.info("WebSocket handshake complete")
@@ -247,6 +275,7 @@ func _force_close_connection(close_code: int = CLOSE_CODE_STALE, close_reason: S
 		_is_connected = false
 		client_disconnected.emit()
 	_last_activity_msec = 0
+	_authed = false
 	_connected_host = ""
 	_connected_port = 0
 
@@ -284,6 +313,10 @@ func _handle_packet(packet: PackedByteArray) -> void:
 		_send_error_response(data.get("id", ""), "INVALID_FORMAT", "Missing 'id' or 'command' field")
 		return
 
+	if not _authed:
+		_handle_auth_gate(data)
+		return
+
 	var id: String = str(data.get("id"))
 	var command: String = data.get("command")
 	var params: Dictionary = data.get("params", {})
@@ -300,3 +333,22 @@ func _send_error_response(id: String, code: String, message: String) -> void:
 			"message": message
 		}
 	})
+
+
+# Puerta de sesión: el primer mensaje debe autenticar con el token vigente.
+# El mensaje auth se responde aquí (no llega al router); cualquier otro
+# comando sin autenticar recibe AUTH_REQUIRED y la conexión sigue abierta.
+func _handle_auth_gate(data: Dictionary) -> void:
+	var id: String = str(data.get("id", ""))
+	if str(data.get("command", "")) == "auth":
+		var params: Dictionary = data.get("params", {})
+		if not _session_token.is_empty() and str(params.get("token", "")) == _session_token:
+			_authed = true
+			_last_activity_msec = Time.get_ticks_msec()
+			send_response({"id": id, "status": "success", "result": {"authed": true}})
+			MCPLog.info("MCP client authenticated session")
+			return
+		_send_error_response(id, "AUTH_FAILED", "Invalid session token")
+		return
+	_send_error_response(id, "AUTH_REQUIRED",
+		"First message must be {\"command\":\"auth\",\"params\":{\"token\":\"...\"}} (see the editor log for the session token)")

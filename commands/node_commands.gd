@@ -130,10 +130,16 @@ func update_node(params: Dictionary) -> Dictionary:
 	if not node:
 		return _error("NODE_NOT_FOUND", "Node not found: %s" % node_path)
 
+	# Edición con historial: cada set entra como do/undo para que Ctrl+Z
+	# del editor revierta lo que el agente cambió.
+	var undo_redo := EditorInterface.get_editor_undo_redo()
+	undo_redo.create_action("MCP update_node %s" % node_path)
 	for key in properties:
 		if key in node:
 			var deserialized := MCPUtils.deserialize_value(properties[key])
-			node.set(key, deserialized)
+			undo_redo.add_do_method(node, "set", key, deserialized)
+			undo_redo.add_undo_method(node, "set", key, node.get(key))
+	undo_redo.commit_action()
 
 	return _success({})
 
@@ -166,7 +172,15 @@ func reparent_node(params: Dictionary) -> Dictionary:
 	if new_parent == node or node.is_ancestor_of(new_parent):
 		return _error("INVALID_REPARENT", "Cannot reparent a node to itself or its descendant")
 
-	node.reparent(new_parent)
+	# Con historial: el undo devuelve el nodo a su padre e índice previos.
+	var old_parent := node.get_parent()
+	var old_index := old_parent.get_children().find(node)
+	var undo_redo := EditorInterface.get_editor_undo_redo()
+	undo_redo.create_action("MCP reparent_node %s" % node_path)
+	undo_redo.add_do_method(node, "reparent", new_parent)
+	undo_redo.add_undo_method(node, "reparent", old_parent)
+	undo_redo.add_undo_method(old_parent, "move_child", node, old_index)
+	undo_redo.commit_action()
 
 	return _success({"new_path": str(root.get_path_to(node))})
 

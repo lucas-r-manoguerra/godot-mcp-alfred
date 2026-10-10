@@ -316,3 +316,30 @@ static func _unquote(s: String) -> String:
 	if t.length() >= 2 and t.begins_with("\"") and t.ends_with("\""):
 		return t.substr(1, t.length() - 2)
 	return t
+
+
+# ── límite de alcance de rutas (res:// / user://) ─────────────────────────────
+# Guardia de accidentes para rutas que llegan del cliente MCP: solo se aceptan
+# rutas dentro del proyecto (res://, uid:// que resuelva al proyecto) o del
+# perfil de usuario (user://). Rechaza absolutas del sistema (/, C:\, ~) y
+# segmentos ".." que escapen del alcance. Devuelve {path} normalizado o
+# {error:{code,message}} con el mismo formato de MCPUtils.error.
+static func validate_scoped_path(path: String) -> Dictionary:
+	var p := path.strip_edges()
+	if p.is_empty():
+		return error("INVALID_PARAMS", "path is required")
+	if p.begins_with("uid://"):
+		var id := ResourceUID.text_to_id(p)
+		if not ResourceUID.has_id(id):
+			return error("PATH_OUT_OF_SCOPE", "Unresolvable uid path: %s" % path)
+		p = ResourceUID.get_id_path(id)
+	else:
+		p = ProjectSettings.localize_path(p)
+	if not (p.begins_with("res://") or p.begins_with("user://")):
+		return error("PATH_OUT_OF_SCOPE",
+			"Path must be inside res:// or user:// (got: %s)" % path)
+	for seg in p.split("/"):
+		if seg == "..":
+			return error("PATH_OUT_OF_SCOPE",
+				"Path must not contain '..' segments (got: %s)" % path)
+	return {"path": p}

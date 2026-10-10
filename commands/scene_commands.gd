@@ -69,6 +69,12 @@ func open_scene(params: Dictionary) -> Dictionary:
 	if scene_path.is_empty():
 		return _error("INVALID_PARAMS", "scene_path is required")
 
+	var scoped := MCPUtils.validate_scoped_path(scene_path)
+	if scoped.has("error"):
+		var err: Dictionary = scoped["error"]
+		return _error(err["code"], err["message"])
+	scene_path = scoped["path"]
+
 	if not FileAccess.file_exists(scene_path):
 		return _error("FILE_NOT_FOUND", "Scene file not found: %s" % scene_path)
 
@@ -215,9 +221,13 @@ func reload_scene(params: Dictionary) -> Dictionary:
 # edited scene's file when none was given. Returns the path String, or an error
 # Dictionary (NO_SCENE / NO_PATH) the caller returns unchanged. Shared by
 # save_scene and reload_scene so the NO_SCENE/NO_PATH handling lives in one place.
+# Caller paths pass the res:// / user:// scope boundary first.
 func _resolve_scene_path(provided_path: String) -> Variant:
 	if not provided_path.is_empty():
-		return provided_path
+		var scoped := MCPUtils.validate_scoped_path(provided_path)
+		if scoped.has("error"):
+			return _error(scoped["error"]["code"], scoped["error"]["message"])
+		return scoped["path"]
 	var err := _require_scene_open()
 	if err:
 		return err
