@@ -32,6 +32,7 @@ func setup(plugin: EditorPlugin) -> void:
 	_register_handler(MCPTilemapCommands.new(), plugin)
 	_register_handler(MCPResourceCommands.new(), plugin)
 	_register_handler(MCPScene3DCommands.new(), plugin)
+	_register_handler(MCPSignalEditCommands.new(), plugin)
 	_register_handler(MCPInputCommands.new(), plugin)
 	_register_handler(MCPIntrospectionCommands.new(), plugin)
 	_register_handler(MCPLifecycleCommands.new(), plugin)
