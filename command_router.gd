@@ -41,6 +41,7 @@ func setup(plugin: EditorPlugin) -> void:
 	_register_handler(MCPGameTimeCommands.new(), plugin)
 	_register_handler(MCPExecCommands.new(), plugin)
 	_register_handler(MCPMeshCommands.new(), plugin)
+	_register_handler(MCPViewportCommands.new(), plugin)
 	reload_custom_tools()
 
 
