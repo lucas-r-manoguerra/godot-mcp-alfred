@@ -4,6 +4,9 @@ class_name MCPScreenshotCommands
 
 const DEFAULT_MAX_WIDTH := 900
 const SCREENSHOT_TIMEOUT := 5.0
+# Límite de validez: texturas sin renderizar reportan un marcador mínimo
+# (p. ej. 2x2). Todo lo igual o menor se considera captura degenerada.
+const MIN_CAPTURE_SIZE := 8
 
 var _screenshot_result: Dictionary = {}
 var _screenshot_pending: bool = false
@@ -83,8 +86,26 @@ func capture_editor_screenshot(params: Dictionary) -> Dictionary:
 	if viewport == null:
 		return _error("NO_VIEWPORT", "Could not find editor viewport")
 
+	# Espera al dibujado antes de leer la textura: sin esto se lee una
+	# textura sin renderizar (marcador de 2x2). Igual que el path de juego.
+	await RenderingServer.frame_post_draw
 	var image := viewport.get_texture().get_image()
+	if _is_degenerate(image):
+		# Un reintento tras otro frame cubre el caso de textura leída
+		# antes del primer frame renderizado o sin layout aplicado.
+		await RenderingServer.frame_post_draw
+		image = viewport.get_texture().get_image()
+	if _is_degenerate(image):
+		return _error("DEGENERATE_CAPTURE", "Editor viewport texture not rendered (empty placeholder). Activa la pestana 2D/3D del editor y reintenta capture_editor_screenshot.")
 	return _process_and_encode_image(image, max_width)
+
+
+# Una imagen degenerada (nula o de tamano marcador) indica textura sin
+# renderizar, no una captura valida. Nunca devolver exito con ese contenido.
+func _is_degenerate(image: Image) -> bool:
+	if image == null:
+		return true
+	return image.get_width() <= MIN_CAPTURE_SIZE and image.get_height() <= MIN_CAPTURE_SIZE
 
 
 # Lossless PNG, not JPEG: vision-token cost is set by resolution, not codec, so
