@@ -5,8 +5,18 @@ class_name MCPCommandRouter
 var _commands: Dictionary = {}
 var _handlers: Array[MCPBaseCommand] = []
 
+# Registro de tools custom (ver reload_custom_tools): nombre -> Callable.
+# Vive separado del mapa estático para poder descargarlo sin tocar los
+# comandos built-in.
+var _custom_commands: Dictionary = {}
+var _custom_handlers: Array = []
+var _plugin: EditorPlugin
+
+const CUSTOM_TOOLS_DIR := "res://addons/godot_mcp/commands/custom"
+
 
 func setup(plugin: EditorPlugin) -> void:
+	_plugin = plugin
 	_register_handler(MCPSystemCommands.new(), plugin)
 	_register_handler(MCPSceneCommands.new(), plugin)
 	_register_handler(MCPNodeCommands.new(), plugin)
@@ -24,6 +34,8 @@ func setup(plugin: EditorPlugin) -> void:
 	_register_handler(MCPGameTimeCommands.new(), plugin)
 	_register_handler(MCPExecCommands.new(), plugin)
 	_register_handler(MCPMeshCommands.new(), plugin)
+	_register_handler(MCPInfinityMUCommands.new(), plugin)
+	reload_custom_tools()
 
 
 func _register_handler(handler: MCPBaseCommand, plugin: EditorPlugin) -> void:
@@ -35,9 +47,72 @@ func _register_handler(handler: MCPBaseCommand, plugin: EditorPlugin) -> void:
 
 
 func handle_command(command: String, params: Dictionary):
+	if _custom_commands.has(command):
+		var custom: Callable = _custom_commands[command]
+		var custom_result = await custom.call(params)
+		return custom_result
 	if not _commands.has(command):
 		return MCPUtils.error("UNKNOWN_COMMAND", "Unknown command: %s" % command)
 
 	var callable: Callable = _commands[command]
 	var result = await callable.call(params)
 	return result
+
+
+## Registra una tool custom bajo [param name]. No pisa comandos built-in:
+## devuelve un error si el nombre ya existe en cualquier mapa.
+func register_tool(name: String, callable: Callable) -> Dictionary:
+	if name.is_empty() or not callable.is_valid():
+		return MCPUtils.error("INVALID_PARAMS", "register_tool needs a name and a valid Callable")
+	if _commands.has(name) or _custom_commands.has(name):
+		return MCPUtils.error("DUPLICATE_TOOL", "Tool already registered: %s" % name)
+	_custom_commands[name] = callable
+	return MCPUtils.success({"tool": name})
+
+
+## Da de baja una tool custom. Los comandos built-in no se pueden descargar.
+func unregister_tool(name: String) -> Dictionary:
+	if not _custom_commands.has(name):
+		return MCPUtils.error("NOT_FOUND", "No custom tool registered: %s" % name)
+	_custom_commands.erase(name)
+	return MCPUtils.success({"removed": name})
+
+
+func has_command(command: String) -> bool:
+	return _commands.has(command) or _custom_commands.has(command)
+
+
+## Hot-reload de tools custom: descarga las anteriores y vuelve a escanear
+## CUSTOM_TOOLS_DIR. Cada .gd que extienda MCPBaseCommand se instancia con
+## setup() y sus comandos entran al mapa custom. Nunca toca los built-in.
+## Devuelve {reloaded, tools, errors}; sin directorio devuelve {reloaded: 0}.
+func reload_custom_tools() -> Dictionary:
+	_custom_commands.clear()
+	_custom_handlers.clear()
+	if not DirAccess.dir_exists_absolute(CUSTOM_TOOLS_DIR):
+		return MCPUtils.success({"reloaded": 0, "tools": [], "errors": [],
+			"note": "No custom tools dir: %s" % CUSTOM_TOOLS_DIR})
+	var loaded: Array = []
+	var errors: Array = []
+	for file in DirAccess.get_files_at(CUSTOM_TOOLS_DIR):
+		if not file.ends_with(".gd"):
+			continue
+		var path := CUSTOM_TOOLS_DIR.path_join(file)
+		var script := load(path) as GDScript
+		if script == null or not script.can_instantiate():
+			errors.append({"file": file, "reason": "not a loadable GDScript"})
+			continue
+		var inst: Object = script.new()
+		if not (inst is MCPBaseCommand):
+			errors.append({"file": file, "reason": "must extend MCPBaseCommand"})
+			continue
+		var handler := inst as MCPBaseCommand
+		handler.setup(_plugin)
+		_custom_handlers.append(handler)
+		for cmd_name in handler.get_commands():
+			if _commands.has(cmd_name) or _custom_commands.has(cmd_name):
+				errors.append({"file": file, "reason": "duplicate tool: %s" % cmd_name})
+				continue
+			_custom_commands[cmd_name] = handler.get_commands()[cmd_name]
+			loaded.append(cmd_name)
+	return MCPUtils.success({"reloaded": loaded.size(), "tools": loaded, "errors": errors})
