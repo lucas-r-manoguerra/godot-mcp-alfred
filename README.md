@@ -5,7 +5,7 @@ Standalone Godot 4 editor addon: a Model Context Protocol bridge between AI codi
 ## What it does
 
 - Exposes the edited scene tree, nodes, resources, animations, TileMaps/GridMaps, profiler data, runtime state, screenshots, input injection and deterministic game-time control as MCP tools over a localhost WebSocket (`127.0.0.1:6550` by default).
-- Session-token `auth` handshake (rotating token in the editor log), single-client discipline, scoped `res://`/`user://` path guard, `EditorUndoRedo`-wrapped edits, and a plugin API (`register_tool` + hot-reload `commands/custom/`) for project-specific tools.
+- Session-token `auth` handshake (rotating token in the editor log), single-client discipline, scoped `res://`/`user://` path guard, `EditorUndoRedo`-wrapped edits, and a plugin API (`register_tool` + hot-reload custom tools) for project-specific tools.
 
 ## Install
 
@@ -28,7 +28,14 @@ Or copy the `godot_mcp/` directory into your project's `addons/` folder. Then en
 - `websocket_server.gd` — single-client server, auth gate, stale reaping
 - `command_router.gd` — builtin + custom tool registry
 - `core/` — envelope, utils, scope guard, logger, debugger plugin
-- `commands/` — one handler file per domain (each ≤ 400 lines); project tools go in `commands/custom/`
+- `commands/` — one handler file per domain (each ≤ 400 lines); project tools go in `mcp_tools/` (see below)
+
+## Custom tools
+
+The loader scans two directories on `reload_custom_tools()` (custom tools win over builtins via `register_tool` / `DUPLICATE_TOOL` on collision):
+
+- `res://mcp_tools/` (project-side, recommended) — lives in your game project, outside the addon. Each `.gd` must extend `MCPBaseCommand` and is instantiated with `setup()`. A missing directory is silently ignored; per-file failures are logged and skipped.
+- `res://addons/godot_mcp/commands/custom/` (legacy) — kept for compatibility, same contract.
 - `game_bridge/` — running-game autoload (input, screenshots, runtime state, exec guard)
 - `ui/` — bottom-panel status UI
 
