@@ -21,6 +21,7 @@ const PROJECT_TOOLS_DIR := "res://mcp_tools"
 
 func setup(plugin: EditorPlugin) -> void:
 	_plugin = plugin
+	_register_handler(MCPAssetCommands.new(), plugin)
 	_register_handler(MCPSystemCommands.new(), plugin)
 	_register_handler(MCPSceneCommands.new(), plugin)
 	_register_handler(MCPNodeCommands.new(), plugin)
